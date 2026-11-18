@@ -1,0 +1,40 @@
+name: Synthetic experiments · tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-tests:
+    name: Python 3.12 · synthetic-only
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout public code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-synthetic.txt
+
+      - name: Install synthetic dependencies only
+        run: python -m pip install -r requirements-synthetic.txt
+
+      - name: Test Day 1 baseline
+        run: python -B -m unittest discover -s tests -p "test_baseline.py" -v
+
+      - name: Test Day 2 analysis
+        run: python -B -m unittest discover -s tests -p "test_analysis.py" -v
+
+      - name: Test Day 3 synthetic workloads
+        run: python -B -m unittest discover -s tests -p "test_day3.py" -v
