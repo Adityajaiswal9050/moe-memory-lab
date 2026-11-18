@@ -1,0 +1,10 @@
+seed,access_order,cache_budget_mib,policy,requests,hits,misses,hit_rate
+42,reversed_requests_within_each_token,128,NO_CACHE,14400,0,14400,0.0
+42,reversed_requests_within_each_token,128,LRU,14400,0,14400,0.0
+42,reversed_requests_within_each_token,128,LFU,14400,0,14400,0.0
+42,reversed_requests_within_each_token,256,NO_CACHE,14400,0,14400,0.0
+42,reversed_requests_within_each_token,256,LRU,14400,7518,6882,0.5220833333333333
+42,reversed_requests_within_each_token,256,LFU,14400,2892,11508,0.20083333333333334
+42,reversed_requests_within_each_token,512,NO_CACHE,14400,0,14400,0.0
+42,reversed_requests_within_each_token,512,LRU,14400,14280,120,0.9916666666666667
+42,reversed_requests_within_each_token,512,LFU,14400,4387,10013,0.3046527777777778
