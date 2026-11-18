@@ -1,145 +1,122 @@
-# MoE Memory Lab
+<div align="center">
 
-MoE Memory Lab is a reproducible research prototype for studying expert reuse
-and cache-policy behavior in Mixture-of-Experts (MoE) systems. It separates
-three kinds of work:
+# 🧠 MoE Memory Lab
 
-1. **Synthetic routing experiments** with deterministic, explicitly defined
-   request distributions.
-2. **Real router observations** collected from an authorized, locally stored
-   gated model.
-3. **Cache replay simulations** that replay routing requests through software
-   cache policies.
+### Exploring expert routing, cache replacement, and memory-efficient LLM inference
 
-The synthetic workflows are the self-contained starting point. The proposed
-expanded Days 1–7 code release also includes the original capture and analysis
-code, but not model files or model-derived outputs. Synthetic experiments
-require neither Hugging Face authentication nor model weights, a GPU, or
-PyTorch. Real-trace observations and analyses remain on publication hold
-pending review of the model's FAIR Noncommercial Research License.
+**A reproducible AI systems research prototype — from synthetic workloads to real-router instrumentation.**
 
-This repository does not implement expert offloading in a model runtime.
-Simulated misses, transfer bytes, and latency are not measurements of disk
-traffic, inference latency, or tokens per second. No inference speedup is
-claimed.
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Synthetic tests](https://github.com/Adityajaiswal9050/moe-memory-lab/actions/workflows/synthetic-tests.yml/badge.svg)](https://github.com/Adityajaiswal9050/moe-memory-lab/actions/workflows/synthetic-tests.yml)
+[![License: MIT](https://img.shields.io/badge/Code%20license-MIT-22C55E.svg)](LICENSE)
+![Research prototype](https://img.shields.io/badge/status-research%20prototype-7C3AED)
+![No measured speedup](https://img.shields.io/badge/benchmark-trace%20simulation%20only-64748B)
 
-## Research motivation
+[**Explore results**](#-selected-results) · [**Architecture**](#-how-it-works) · [**Run locally**](#-quick-start) · [**Methodology**](docs/METHODOLOGY.md) · [**Benchmark details**](docs/BENCHMARKS.md)
 
-Sparse MoE models route each token to a subset of experts in each MoE layer.
-When expert weights cannot all be kept in fast memory, a runtime might need to
-load experts as routing decisions are made. This lab studies routing reuse and
-how simple cache policies respond to different request streams. Its replay
-experiments count simulated cache hits and misses; they do not implement or
-measure a production offloading system.
+</div>
 
-## Architecture and cache model
+---
 
-An MoE layer contains a router and multiple expert networks. For each token,
-the router selects a top-k subset of experts. The synthetic baseline models
-this as two unique expert requests per layer and token. Cache keys include
-both the layer and its local expert ID, and the baseline uses one global cache
-across layers.
+> [!IMPORTANT]
+> **Scope and evidence.** This is a cache-replay and routing-analysis research project, **not** a production inference engine. Published benchmark figures come from **synthetic workloads**. The code supports authorized real-model routing collection, but gated model assets, real traces, and their derived results are intentionally excluded pending the applicable license review. **No inference speedup, disk I/O improvement, or measured offloading acceleration is claimed.**
 
-The baseline compares `NO_CACHE`, LRU, and LFU. Later synthetic experiments
-also evaluate exponentially decayed LFU and segmented LRU (SLRU). Each policy
-replays the same ordered request sequence within an experiment.
+## 🎯 The research question
 
-### Synthetic baseline assumptions
+Mixture-of-Experts (MoE) models select only a subset of expert networks for each token. That helps reduce active compute, but when experts cannot all live in fast memory, **which experts should a hypothetical cache retain?**
 
-- 6 layers and 32 experts per layer.
-- 2 unique active experts per layer per token.
-- 1,200 token steps with seed 42.
-- 16 MiB modeled size per expert.
-- Four hot experts per layer and phase; the hot set changes every 250 tokens.
-- The original baseline samples uniformly from each phase's hot set and has no
-  cold-tail requests. It is not a learned router or a realistic long-tail
-  distribution.
-- The baseline budgets are 128, 256, and 512 MiB.
+MoE Memory Lab investigates how recency, frequency, and changing routing patterns affect expert-cache hit rates under a constrained memory budget.
 
-The Day 3 workloads are separate synthetic constructions: static skew with a
-cold tail, abrupt hot-set changes, gradual drift, and alternating task
-patterns. They retain the per-layer top-k constraint and use fixed seeds.
+<table>
+<tr>
+<td align="center"><strong>5</strong><br/><sub>cache policies implemented</sub></td>
+<td align="center"><strong>4</strong><br/><sub>synthetic workload families</sub></td>
+<td align="center"><strong>5</strong><br/><sub>repeated seeds in Day 3</sub></td>
+<td align="center"><strong>35</strong><br/><sub>local unit tests last verified</sub></td>
+</tr>
+</table>
 
-### Metrics and interpretation
+**Policies:** No cache · LRU · LFU · exponentially decayed LFU · segmented LRU (SLRU).
 
-Hits, misses, miss rate, and cache occupancy are replay accounting. In the
-synthetic baseline, modeled transferred MiB equals misses multiplied by the
-assumed 16 MiB expert size. Its modeled I/O latency adds an assumed 100 ms per
-miss; that constant is not measured disk latency and must not be interpreted
-as inference latency.
+## 📊 Selected results
 
-For model-derived traces, the cache unit is estimated from expert tensor
-metadata. A replayed miss multiplied by that size is still only modeled expert
-traffic: the replay does not transfer model weights. Prefill requests are
-serialized for replay even though real prefill routes a batch of tokens;
-hardware may coalesce or issue expert loads concurrently. Decode requests are
-also replayed, not timed as cache-backed inference.
+### Workload shifts change which policy wins
 
-## Experiments
+**Mean synthetic cache hit rate (%)** at a **512 MiB simulated cache budget**, over seeds **42–46** (Day 3).
 
-| Day | Scope |
-|---|---|
-| 1 | Synthetic baseline with `NO_CACHE`, LRU, and LFU. |
-| 2 | Synthetic phase and adaptation analysis, alternate request order, and repeated-seed/budget comparisons. |
-| 3 | Audit of the original generator and comparison of four distinct synthetic workloads. |
-| 4 | A smoke test that records actual router selections from a locally available gated model. |
-| 5 | Routing-frequency, reuse, and cache-replay analysis of a real trace. |
-| 6 | A limited multi-prompt routing pilot with reset-per-prompt and persistent replay scenarios. |
-| 7 | Synthetic development sweep for decay settings, plus exploratory comparisons of decayed LFU and SLRU. |
+| Synthetic workload | LRU | LFU | Better of these two |
+|:--|--:|--:|:--|
+| Static skew + cold tail | 87.84% | **90.26%** | LFU |
+| Abrupt hot-set changes | **87.20%** | 28.44% | LRU |
+| Gradual drift | **42.83%** | 14.11% | LRU |
+| Alternating task patterns | **42.60%** | 33.83% | LRU |
 
-Days 4–7 are summarized here only at the workflow level. No model-specific
-quantitative findings are included in this README.
+**Interpretation:** frequency can help when the working set is stable; stale frequency information can hurt when routing changes. These workloads were constructed by us, so this table **does not establish behavior on real models**.
 
-## Publication hold and model-license boundary
+<p align="center">
+  <img src="figures/day3/static_skewed_hit_and_transfer.png" width="49%" alt="Synthetic static-skew workload: cache-hit and modeled transfer comparisons">
+  <img src="figures/day3/abrupt_changes_hit_and_transfer.png" width="49%" alt="Synthetic abrupt-change workload: cache-hit and modeled transfer comparisons">
+</p>
+<p align="center"><sub>Day 3 synthetic workload comparisons. “Transfer” is modeled as misses × assumed expert size, not measured I/O.</sub></p>
 
-The following third-party assets and model-derived findings are **on hold**
-until redistribution and publication permissions are reviewed under the FAIR
-Noncommercial Research License:
+<details>
+<summary><strong>More published workload figures</strong></summary>
 
-- Actual model-routing traces and model-derived results from Days 4–7.
-- Day 4–7 CSV/JSON reports and figures.
-- Downloaded gated-model source, configuration, tokenizer assets, and weights.
-- Quantitative claims based on those traces.
+<p align="center">
+  <img src="figures/day3/gradual_drift_hit_and_transfer.png" width="49%" alt="Synthetic gradual-drift workload comparison">
+  <img src="figures/day3/mixed_alternating_tasks_hit_and_transfer.png" width="49%" alt="Synthetic alternating-task workload comparison">
+</p>
 
-The local `.gitignore` excludes these assets from Git while review is pending;
-it does not delete local files or grant permission to redistribute them. The
-model weight file, credentials, and Hugging Face caches must not be committed.
-The proposed expanded release contains original project instrumentation and
-analysis code separately from those assets. The initial staged candidate does
-not include `real_trace/model_integrity.json` or any gated model files. The
-local manifest contains factual identifiers, revision, digests, byte count,
-and architecture metadata—not model source or weights—and is ignored. Those
-facts are not automatically copyrighted material, but applicable model terms
-still require review. The approved MIT license covers original project code
-only, not Meta's model or third-party assets.
+- [Day 1–2 phase analysis](figures/phase_hit_rate_and_transfer.png)
+- [Full benchmark tables, sources, and caveats](docs/BENCHMARKS.md)
+</details>
 
-## Public synthetic reproduction on Windows
+### An instructive baseline failure
 
-Tested with Python 3.12 on Windows. The Day 1 baseline uses only the Python
-standard library. The Day 2/3 analysis scripts and their public tests require
-the pinned Matplotlib dependency; they do not require CUDA, PyTorch, gated
-weights, or Hugging Face authentication.
+The original baseline generator had **no cold-tail requests**. At 512 MiB it gave LRU a **99.17% hit rate**, which initially looked impressive. Day 3's audit showed that the synthetic workload was too easy to cache; after adding a cold tail and changing working sets, the result became much more sensitive to the workload.
 
-In PowerShell, from the repository root of a clean checkout:
+**A seemingly strong benchmark can be a property of its generator, not of a better algorithm.** [See the full analysis](docs/BENCHMARKS.md#why-the-first-baseline-was-misleading).
 
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe baseline.py
+## 🧩 How it works
+
+```mermaid
+flowchart TD
+    A["Synthetic workload generators<br/>Days 1–3"] --> C["Ordered expert requests"]
+    B["Authorized local MoE model<br/>optional; never bundled"] --> D["Router instrumentation<br/>Days 4 & 6"]
+    D --> E["Real routing traces<br/>private / not published"]
+    E -. "optional offline replay" .-> C
+    C --> F["Cache replay engine"]
+    F --> G["No cache · LRU · LFU<br/>Decayed LFU · SLRU"]
+    G --> H["Hits / misses / evictions<br/>modeled bytes and figures"]
+    classDef public fill:#eaf4ff,stroke:#468bd2,color:#173b62
+    classDef gated fill:#fff1e5,stroke:#df974e,color:#63390a
+    class A,C,F,G,H public
+    class B,D,E gated
 ```
 
-To run the Day 2 and Day 3 analyses:
+**Important distinction:** a router trace records *which expert was selected*; a cache replay estimates *how a policy would behave* if those requests were serviced by a bounded cache. This repo does **not** move weights between GPU, CPU RAM, and SSD during inference.
+
+For an implementation walkthrough, event-order assumptions, and formulas, see [Architecture & methodology](docs/METHODOLOGY.md).
+
+## ⚡ Quick start
+
+The **public synthetic experiments need no GPU, Hugging Face login, model download, or PyTorch**.
+
+**Windows PowerShell · Python 3.12**
 
 ```powershell
+git clone https://github.com/Adityajaiswal9050/moe-memory-lab.git
+cd moe-memory-lab
+py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-synthetic.txt
+
+# Generate deterministic synthetic results and figures
+.\.venv\Scripts\python.exe baseline.py
 .\.venv\Scripts\python.exe analysis.py
 .\.venv\Scripts\python.exe day3_analysis.py
 ```
 
-These scripts generate or replace their corresponding synthetic outputs under
-`data/`, `results/`, and `figures/`. To avoid overwriting an existing
-experiment, reproduce in a fresh checkout or copy first.
-
-Run the public synthetic tests without gated assets:
+**Run the synthetic test subset (15 tests):**
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_baseline.py" -v
@@ -147,130 +124,75 @@ Run the public synthetic tests without gated assets:
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_day3.py" -v
 ```
 
-The proposed expanded release also has public standalone Day 4–7 unit tests.
-They use synthetic traces, fake models, or temporary files; they need optional
-Python dependencies but no gated model assets, Hugging Face authentication,
-GPU hardware, or inference. Install the optional dependencies as described
-below, then run:
+Run these generation commands in a fresh checkout or copy: they write to `data/`, `results/`, and `figures/`. The public CI workflow runs the synthetic test subset only.
 
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_day5.py" -v
-.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_day6.py" -v
-.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_day7.py" -v
-.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_real_trace.py" -v
-.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test*.py" -v
-```
+[**Full setup, optional dependencies, and real-model boundaries →**](docs/METHODOLOGY.md#reproducing-the-experiments)
 
-The synthetic subset is 15 tests, the standalone Day 4–7 subset is 20 tests,
-and default full discovery runs 35 tests. Any private-data Day 5 integration
-checks are separate, excluded from normal discovery and the public allowlist,
-and require the authorized local trace, config, and Safetensors weights.
+## 🔬 Research journey
 
-## Optional gated-model workflow
+| Stage | Research track | Where to look |
+|:--|:--|:--|
+| **Day 1** | Synthetic cache baseline: no cache, LRU, LFU | [`baseline.py`](baseline.py) |
+| **Day 2** | Phase changes, seed variance, alternate ordering | [`analysis.py`](analysis.py) |
+| **Day 3** | Baseline audit and four harder synthetic workloads | [`day3_analysis.py`](day3_analysis.py) · [figures](figures/day3/) |
+| **Day 4** | Guarded, optional real-model router instrumentation | [`real_trace/smoke_test.py`](real_trace/smoke_test.py) |
+| **Day 5** | Real-trace schema, expert reuse and cache replay | [`day5_analysis.py`](day5_analysis.py) |
+| **Day 6** | Multi-prompt capture and reset-versus-persistent cache replay | [`day6_analysis.py`](day6_analysis.py) |
+| **Day 7** | Decayed LFU, SLRU and offline policy comparisons | [`day7_policies.py`](day7_policies.py) |
 
-This workflow is separate from public synthetic reproduction. The staged
-candidate includes capture scripts and runtime requirements, but excludes
-the integrity manifest, gated model files, and traces. Do not run inference
-without authorized access, acceptance of the model terms, a trusted matching
-integrity manifest placed locally at `real_trace/model_integrity.json`, and
-any required experiment approval. Without that manifest, the scripts stop
-before loading model code.
+Days 4–7 are published as **original code and methodology**, not a public model benchmark. Their runtime inputs and model-derived reports remain local.
 
-1. Review the model card and applicable license; confirm that using and
-   retaining outputs is permitted for the intended noncommercial research.
-2. Install the pinned CUDA PyTorch wheel from the official PyTorch CUDA 12.8
-   wheel index, then install the remaining pinned runtime dependencies:
-
-   ```powershell
-   .\.venv\Scripts\python.exe -m pip install torch==2.8.0+cu128 --index-url https://download.pytorch.org/whl/cu128
-   .\.venv\Scripts\python.exe -m pip install -r real_trace/requirements.txt
-   ```
-
-   The installed PyTorch version satisfies its matching pin. No system CUDA
-   driver change is part of this workflow.
-3. Obtain the exact approved model revision through the authorized channel and
-   place its local files in the ignored `real_trace/model_source/` directory.
-   Obtain the matching `real_trace/model_integrity.json` from a trusted audit
-   record and place it locally; it is deliberately not included in this
-   initial candidate. Never derive expected hashes from downloaded files. The
-   manifest holds factual model/revision identifiers, audited custom-code
-   Git-blob hashes, expected weight byte size and SHA-256, and expected
-   routing architecture. It contains no third-party implementation or model
-   weights. These facts are not automatically copyrighted material, but that
-   is not legal clearance under the model terms.
-4. Before loading, both `smoke_test.py` and `day6_pilot.py` fail closed if the
-   manifest is missing or malformed, either audited custom source hash differs,
-   or the weight size or SHA-256 differs. They also check the loaded
-   expert/top-k/layer configuration. Only after these checks do the scripts
-   use local-only loading and `trust_remote_code=True` for the reviewed code.
-   Tokenizer loading remains local-only and does not enable remote code. The
-   manifest's revision is audit provenance; these checks hash the two custom
-   Python source files and the weights, but do not individually hash config or
-   tokenizer files.
-5. Check available RAM/VRAM before running the one-prompt smoke test. The
-   smoke test uses evaluation mode, inference mode, batch size 1, and at most
-   eight generated tokens. If CUDA OOM occurs during load or generation, it
-   records the failure and stops. It does **not** automatically retry with
-   CPU offloading or switch models.
-6. Any additional inference pilot requires its own approval. Keep the
-   resulting traces and model-derived analyses local until licensing review is
-   complete.
-
-The dependency pins are recorded in `real_trace/requirements.txt` in the full
-local workspace. The synthetic-only dependency is recorded separately in
-`requirements-synthetic.txt`.
-
-Offline analysis is distinct from inference: Day 5 needs the authorized Day 4
-trace, local model configuration, and Safetensors metadata; Day 6 and Day 7
-need the Day 6 trace/report plus local configuration and expert-size inputs.
-Those analyses do not run the model, but their inputs and derived outputs
-remain local pending terms review. `smoke_test.py` and `day6_pilot.py` are the
-scripts that perform model inference.
-
-## Project structure
+### Repository map
 
 ```text
-baseline.py, analysis.py       Day 1–2 synthetic baseline and analysis
-day3_workloads.py              Explicit synthetic workload generators
-day3_analysis.py               Day 3 synthetic comparisons
-day5_analysis.py               Day 5 trace analysis and cache replay
-day6_analysis.py               Multi-prompt analysis and replay code
-day7_analysis.py               Synthetic sweep and exploratory replay driver
-day7_policies.py               Decayed LFU and SLRU policy implementations
-tests/                         Unit tests
-data/                          Synthetic request trace
-results/                       Synthetic outputs; Day 4–7 outputs are ignored
-figures/                       Synthetic figures; Day 4–7 figures are ignored
-real_trace/                    Collector and capture code; local model assets,
-                               traces, and integrity manifest are ignored and
-                               not in the initial staged set
+moe-memory-lab/
+├── baseline.py, analysis.py          # Days 1–2
+├── day3_workloads.py, day3_analysis.py
+├── day5_analysis.py                  # Offline routing reuse & cache replay
+├── day6_analysis.py                  # Multi-prompt replay analysis
+├── day7_policies.py, day7_analysis.py
+├── real_trace/
+│   ├── collector.py                  # Router-event instrumentation
+│   ├── smoke_test.py                 # Guarded single-prompt capture
+│   └── day6_pilot.py                 # Guarded multi-prompt capture
+├── tests/                            # 15 synthetic + 20 standalone tests
+├── data/                             # Synthetic traces
+├── results/                          # Published synthetic CSVs
+├── figures/                          # Published synthetic plots
+└── docs/                             # Benchmark and methodology notes
 ```
 
-This describes the full local working tree. `PUBLIC_RELEASE_PLAN.md` preserves
-the exact 31-file synthetic baseline allowlist and proposes 13 additions for a
-44-file Days 1–7 candidate. The initial staged set excludes the integrity
-manifest, leaving 43 existing candidate files plus `LICENSE`. Actual traces,
-third-party model files, Day 4–7 results/figures, and model-derived claims
-remain excluded pending applicable terms review.
+## 🧪 What is measured — and what is not
 
-## Limitations and future research
+| Metric | Status |
+|:--|:--|
+| Synthetic request counts and cache hits/misses | **Computed by simulator** |
+| Synthetic modeled weight-transfer bytes | **Misses × assumed expert size** |
+| Assumed I/O latency in early simulation | **Illustrative constant, not hardware timing** |
+| Authorized local router selections | Instrumentation supported; **derived data not published** |
+| GPU↔RAM↔SSD transfers and tokens/second | **Not measured by this project** |
 
-- Synthetic results depend on the constructed routing distributions and are not
-  evidence of learned-model routing behavior.
-- The original baseline has no cold tail; Day 3 adds synthetic cold-tail and
-  drift scenarios but does not make them representative of real models.
-- Real-trace experiments are small exploratory samples, not held-out
-  evaluation. They must not be generalized to all prompts or MoE models.
-- Prefill serialization is a replay approximation, not physical expert-load
-  ordering.
-- Modeled transfer bytes are not measured memory or disk traffic. No
-  tokens-per-second or inference-latency improvement is established.
-- A future study should use a pre-registered held-out prompt set and, if
-  authorized, separately measure a real runtime's I/O and inference behavior.
+A prefill routing trace is serialized for replay, although actual inference processes a batch of prompt tokens and may coalesce expert loads. A good cache miss rate is **not** automatically a faster model.
 
-## Project license
+## 🔐 Responsible use & licensing
 
-The approved MIT `LICENSE` applies only to original MoE Memory Lab
-contributions. It does not apply to Meta's model or any third-party source,
-weights, tokenizer/configuration assets, or model-derived outputs; their
-separate terms continue to apply.
+- **Included:** original code, synthetic traces, public synthetic results and figures, and public fixture-based tests.
+- **Excluded:** Hugging Face credentials, gated MobileMoE source/tokenizer/configuration/weights, the local integrity manifest, actual routing traces, and Day 4–7 model-derived outputs.
+- The optional capture scripts require **independently authorized model access**, acceptance of the model's terms, and a trusted locally supplied `real_trace/model_integrity.json`. They stop if required integrity checks fail.
+- The [MIT license](LICENSE) applies to **original MoE Memory Lab contributions only**; it does not relicense third-party assets or model outputs. Real-model derived results are on publication hold pending review of the model's FAIR Noncommercial Research License.
+
+See [the release boundary](PUBLIC_RELEASE_PLAN.md) and [the optional workflow](docs/METHODOLOGY.md#optional-authorized-real-model-workflow).
+
+## 🧭 Next research steps
+
+- [ ] Evaluate policies on a preregistered, held-out prompt set **if permitted**
+- [ ] Compare against stronger established adaptive policies and quantify metadata/compute overhead
+- [ ] Model expert sizes, concurrent prefill access, and transfer overlap more faithfully
+- [ ] Integrate actual expert offloading in a separate runtime
+- [ ] Measure end-to-end transfer costs, latency, and throughput before making performance claims
+
+---
+
+<div align="center">
+  <sub>Built as an independent learning and systems-research project. Contributions and constructive feedback are welcome through <a href="https://github.com/Adityajaiswal9050/moe-memory-lab/issues">GitHub Issues</a>.</sub>
+</div>
